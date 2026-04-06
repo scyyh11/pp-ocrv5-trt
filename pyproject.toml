@@ -1,0 +1,38 @@
+[project]
+name = "pp-ocrv5-trt"
+version = "0.1.0"
+description = "TensorRT export and inference for PP-OCRv5 models (HuggingFace Transformers)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pyclipper",
+]
+
+[project.optional-dependencies]
+export = [
+    "torch>=2.0",
+    "transformers>=4.50",
+    "onnx",
+    "onnxruntime",
+]
+trt = [
+    "tensorrt>=10.0",
+    "cuda-python",
+]
+all = [
+    "pp-ocrv5-trt[export,trt]",
+]
+dev = [
+    "pp-ocrv5-trt[all]",
+    "pytest",
+]
+
+[project.scripts]
+pp-ocrv5-trt = "pp_ocrv5_trt.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
