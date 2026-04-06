@@ -144,10 +144,6 @@ pp_ocrv5_trt/
     cli.py          # Command-line interface
 ```
 
-## Background
-
-[PaddleOCR#17887](https://github.com/PaddlePaddle/PaddleOCR/issues/17887) reported that TensorRT acceleration silently fails for PP-OCRv5 models in C++ inference. This tool provides an alternative path: use the PyTorch model ports in HuggingFace Transformers and export directly to TensorRT, bypassing the PaddlePaddle framework entirely.
-
 ## License
 
 Apache-2.0
