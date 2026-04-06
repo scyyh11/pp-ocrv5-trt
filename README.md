@@ -6,13 +6,36 @@ Export pretrained or finetuned PP-OCRv5 models to TensorRT engines for high-thro
 
 ## Performance
 
-Tested on NVIDIA RTX 4070 Super, TensorRT 10.16, FP16:
+Tested on NVIDIA RTX 4070 Super, TensorRT 10.16, FP16, 200 iterations:
 
-| Model | Input Size | Latency (median) | Throughput |
-|-------|-----------|------------------|------------|
-| server_det | 640x640 | 6.4 ms | 135 infer/s |
+### Latency
 
-TRT vs PyTorch accuracy: cosine similarity 0.9999, max absolute diff < 0.001.
+| Model | Input Size | PyTorch (median) | TRT FP16 (median) | Speedup |
+|-------|-----------|-----------------|-------------------|---------|
+| server_det | 640x640 | 16.70 ms | 5.80 ms | **2.88x** |
+| server_rec | 48x320 | 6.82 ms | 2.35 ms | **2.90x** |
+| mobile_det | 640x640 | 10.10 ms | 3.43 ms | **2.95x** |
+| mobile_rec | 48x320 | 12.18 ms | 2.97 ms | **4.10x** |
+
+### Throughput
+
+| Model | PyTorch (infer/s) | TRT FP16 (infer/s) | Gain |
+|-------|------------------|-------------------|------|
+| server_det | 57.5 | 166.7 | 2.9x |
+| server_rec | 136.1 | 374.5 | 2.8x |
+| mobile_det | 94.4 | 281.1 | 3.0x |
+| mobile_rec | 67.6 | 298.4 | 4.4x |
+
+### Accuracy (TRT FP16 vs PyTorch FP32)
+
+| Model | Max abs diff | Cosine similarity |
+|-------|-------------|-------------------|
+| server_det | 0.000836 | 0.9998 |
+| server_rec | 0.005075 | 0.9999 |
+| mobile_det | 0.000000 | 0.9482 |
+| mobile_rec | 0.017378 | 0.9999 |
+
+TensorRT FP16 delivers **~3-4x speedup** over PyTorch with negligible accuracy loss.
 
 ## Supported Models
 
