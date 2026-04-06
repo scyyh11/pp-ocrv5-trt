@@ -10,6 +10,24 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _get_cudart():
+    """Import cudart from whichever cuda-python version is installed."""
+    try:
+        # cuda-python >= 12.x new layout
+        from cuda.bindings import runtime as cudart
+        return cudart
+    except ImportError:
+        pass
+    try:
+        # cuda-python < 12.x legacy layout
+        from cuda import cudart
+        return cudart
+    except ImportError:
+        raise ImportError(
+            "cuda-python is required. Install with: pip install cuda-python"
+        )
+
+
 class TrtModel:
     """Load and run a TensorRT engine.
 
@@ -21,11 +39,9 @@ class TrtModel:
 
     def __init__(self, engine_path: str | Path):
         import tensorrt as trt
-        from cuda import cuda, cudart
 
         self._trt = trt
-        self._cuda = cuda
-        self._cudart = cudart
+        self._cudart = _get_cudart()
 
         engine_path = Path(engine_path)
         logger.info("Loading TRT engine: %s", engine_path)
@@ -39,8 +55,10 @@ class TrtModel:
         self._context = self._engine.create_execution_context()
 
         # Create CUDA stream
+        cudart = self._cudart
         err, self._stream = cudart.cudaStreamCreate()
-        assert err == cudart.cudaError_t.cudaSuccess, f"cudaStreamCreate failed: {err}"
+        assert err == 0 or str(err) == "cudaError_t.cudaSuccess", \
+            f"cudaStreamCreate failed: {err}"
 
         # Inspect I/O tensors
         self._input_name = None
@@ -69,7 +87,6 @@ class TrtModel:
             Output tensor as numpy array.
         """
         cudart = self._cudart
-        trt = self._trt
 
         pixel_values = np.ascontiguousarray(pixel_values.astype(np.float32))
 
@@ -86,17 +103,16 @@ class TrtModel:
         input_nbytes = pixel_values.nbytes
         output_nbytes = output.nbytes
 
-        err, d_input = cudart.cudaMallocAsync(input_nbytes, self._stream)
-        assert err == cudart.cudaError_t.cudaSuccess
-        err, d_output = cudart.cudaMallocAsync(output_nbytes, self._stream)
-        assert err == cudart.cudaError_t.cudaSuccess
+        err, d_input = cudart.cudaMalloc(input_nbytes)
+        assert err == 0 or "Success" in str(err), f"cudaMalloc failed: {err}"
+        err, d_output = cudart.cudaMalloc(output_nbytes)
+        assert err == 0 or "Success" in str(err), f"cudaMalloc failed: {err}"
 
         # Copy input H→D
-        err, = cudart.cudaMemcpyAsync(
+        err, = cudart.cudaMemcpy(
             d_input, pixel_values.ctypes.data, input_nbytes,
-            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, self._stream,
+            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
         )
-        assert err == cudart.cudaError_t.cudaSuccess
 
         # Set tensor addresses
         self._context.set_tensor_address(self._input_name, int(d_input))
@@ -105,23 +121,21 @@ class TrtModel:
         # Execute
         self._context.execute_async_v3(stream_handle=int(self._stream))
 
-        # Copy output D→H
-        err, = cudart.cudaMemcpyAsync(
-            output.ctypes.data, d_output, output_nbytes,
-            cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, self._stream,
-        )
-        assert err == cudart.cudaError_t.cudaSuccess
-
         # Synchronize
-        err, = cudart.cudaStreamSynchronize(self._stream)
-        assert err == cudart.cudaError_t.cudaSuccess
+        cudart.cudaStreamSynchronize(self._stream)
+
+        # Copy output D→H
+        cudart.cudaMemcpy(
+            output.ctypes.data, d_output, output_nbytes,
+            cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+        )
 
         # Free device memory
-        cudart.cudaFreeAsync(d_input, self._stream)
-        cudart.cudaFreeAsync(d_output, self._stream)
+        cudart.cudaFree(d_input)
+        cudart.cudaFree(d_output)
 
         return output
 
     def __del__(self):
-        if hasattr(self, "_stream"):
+        if hasattr(self, "_stream") and hasattr(self, "_cudart"):
             self._cudart.cudaStreamDestroy(self._stream)

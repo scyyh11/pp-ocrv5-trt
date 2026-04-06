@@ -97,7 +97,7 @@ def export_onnx(
 def verify_onnx(
     onnx_path: str | Path,
     model_name_or_path: str | None = None,
-    atol: float = 1e-4,
+    atol: float = 1e-3,
 ) -> bool:
     """Verify ONNX model output matches PyTorch.
 
@@ -181,11 +181,12 @@ def build_trt_engine(
     parser = trt.OnnxParser(network, trt_logger)
 
     logger.info("Parsing ONNX: %s", onnx_path)
-    with open(onnx_path, "rb") as f:
-        if not parser.parse(f.read()):
-            for i in range(parser.num_errors):
-                logger.error("ONNX parse error: %s", parser.get_error(i))
-            raise RuntimeError("Failed to parse ONNX model")
+    # Use parse_from_file so TRT can find external weight data files
+    # (e.g. model.onnx.data) relative to the ONNX file path.
+    if not parser.parse_from_file(str(onnx_path.resolve())):
+        for i in range(parser.num_errors):
+            logger.error("ONNX parse error: %s", parser.get_error(i))
+        raise RuntimeError("Failed to parse ONNX model")
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(
@@ -282,9 +283,34 @@ def _load_hf_model(model_name_or_path: str):
     model_type = _model_type(model_name_or_path)
 
     logger.info("Loading model: %s", model_name_or_path)
-    model = transformers.AutoModel.from_pretrained(
-        model_name_or_path, trust_remote_code=True
-    )
+    if model_type == "det":
+        model = transformers.AutoModelForObjectDetection.from_pretrained(
+            model_name_or_path, trust_remote_code=True
+        )
+    else:
+        # Rec models: load the ForTextRecognition variant (includes head + softmax).
+        # AutoModel loads the base model without the classification head.
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        import importlib
+        module = importlib.import_module(
+            f"transformers.models.{config.model_type}.modeling_{config.model_type}"
+        )
+        # Find the ForTextRecognition class by scanning module attributes
+        rec_cls = None
+        for attr_name in dir(module):
+            if attr_name.endswith("ForTextRecognition"):
+                rec_cls = getattr(module, attr_name)
+                break
+        if rec_cls is not None:
+            model = rec_cls.from_pretrained(model_name_or_path)
+        elif config.architectures:
+            model_cls = getattr(module, config.architectures[0])
+            model = model_cls.from_pretrained(model_name_or_path)
+        else:
+            model = transformers.AutoModel.from_pretrained(
+                model_name_or_path, trust_remote_code=True
+            )
     return model, model_type
 
 

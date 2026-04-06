@@ -9,6 +9,7 @@ dependencies = [
     "numpy",
     "opencv-python",
     "pyclipper",
+    "shapely",
 ]
 
 [project.optional-dependencies]
